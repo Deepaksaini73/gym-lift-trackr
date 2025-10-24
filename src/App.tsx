@@ -14,6 +14,8 @@ import ProgressPhotos from "./pages/ProgressPhotos";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/context/AuthProvider";
 import RequireAuth from "@/components/RequireAuth";
+import { InstallPrompt } from "@/components/InstallPrompt";
+import { OfflineIndicator } from "@/components/OfflineIndicator";
 
 const queryClient = new QueryClient();
 
@@ -23,6 +25,8 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        <OfflineIndicator />
+        <InstallPrompt />
         <BrowserRouter>
           <Routes>
             {/* Public */}
