@@ -3,7 +3,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dumbbell, Trash2, Edit, Calendar } from "lucide-react";
+import { Dumbbell, Trash2, Edit, Calendar, Plus, X } from "lucide-react";
 import { useAuth } from "@/context/AuthProvider";
 import { supabase } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
@@ -15,7 +15,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface WorkoutSet {
   reps: number;
@@ -44,6 +53,7 @@ const Workout = () => {
   const [editingWorkout, setEditingWorkout] = useState<WorkoutLog | null>(null);
   const [editSets, setEditSets] = useState<WorkoutSet[]>([]);
   const [updating, setUpdating] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -80,12 +90,14 @@ const Workout = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async () => {
+    if (!deleteId) return;
+
     try {
       const { error } = await supabase
         .from("workout_logs")
         .delete()
-        .eq("id", id);
+        .eq("id", deleteId);
 
       if (error) throw error;
 
@@ -94,6 +106,7 @@ const Workout = () => {
         description: "Workout log deleted successfully",
       });
 
+      setDeleteId(null);
       fetchTodayWorkouts();
     } catch (error) {
       console.error("Error deleting workout:", error);
@@ -116,14 +129,49 @@ const Workout = () => {
     setEditSets(newSets);
   };
 
+  const addNewSet = () => {
+    const newSet: WorkoutSet = {
+      reps: 0,
+      weight: 0,
+    };
+    setEditSets([...editSets, newSet]);
+  };
+
+  const removeSet = (index: number) => {
+    if (editSets.length <= 1) {
+      toast({
+        title: "Cannot Remove",
+        description: "At least one set is required",
+        variant: "destructive",
+      });
+      return;
+    }
+    const newSets = editSets.filter((_, i) => i !== index);
+    setEditSets(newSets);
+  };
+
   const handleUpdate = async () => {
     if (!editingWorkout) return;
 
-    const validSets = editSets.filter(set => set.reps > 0 || set.weight > 0);
+    const validSets = editSets.filter(set => set.reps > 0 && set.weight >= 0);
     if (validSets.length === 0) {
       toast({
         title: "Invalid Data",
-        description: "Please enter at least one set",
+        description: "Please enter at least one set with reps and weight",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const hasInvalidSets = editSets.some(set => 
+      (set.reps > 0 && set.weight < 0) || 
+      (set.reps < 0)
+    );
+
+    if (hasInvalidSets) {
+      toast({
+        title: "Invalid Data",
+        description: "Please enter valid values for all sets",
         variant: "destructive",
       });
       return;
@@ -144,8 +192,8 @@ const Workout = () => {
       if (error) throw error;
 
       toast({
-        title: "Updated",
-        description: "Workout updated successfully",
+        title: "Updated! 💪",
+        description: `Workout updated with ${validSets.length} set${validSets.length > 1 ? 's' : ''}`,
       });
 
       setEditingWorkout(null);
@@ -178,6 +226,7 @@ const Workout = () => {
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-muted-foreground">Loading workouts...</p>
         </div>
+        <BottomNav />
       </div>
     );
   }
@@ -257,7 +306,7 @@ const Workout = () => {
                 {bodyPartWorkouts.map((workout) => (
                   <Card key={workout.id} className="p-4 bg-card border-border hover:border-primary/50 transition-all">
                     <div className="flex items-start justify-between mb-3">
-                      <div>
+                      <div className="flex-1">
                         <h3 className="text-lg font-semibold text-foreground">
                           {workout.exercise_name}
                         </h3>
@@ -269,20 +318,20 @@ const Workout = () => {
                           })}
                         </p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-shrink-0">
                         <Button
                           variant="ghost"
-                          size="icon"
+                          size="sm"
                           onClick={() => openEditDialog(workout)}
-                          className="h-8 w-8"
+                          className="h-9 w-9 p-0"
                         >
                           <Edit className="h-4 w-4 text-primary" />
                         </Button>
                         <Button
                           variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(workout.id)}
-                          className="h-8 w-8"
+                          size="sm"
+                          onClick={() => setDeleteId(workout.id)}
+                          className="h-9 w-9 p-0"
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
@@ -327,7 +376,7 @@ const Workout = () => {
 
       {/* Edit Dialog */}
       <Dialog open={!!editingWorkout} onOpenChange={() => setEditingWorkout(null)}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[500px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Workout</DialogTitle>
             <DialogDescription>
@@ -335,32 +384,62 @@ const Workout = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-[60px_1fr_1fr] gap-2 text-sm font-medium text-muted-foreground">
+            <div className="grid grid-cols-[60px_1fr_1fr_50px] gap-2 text-sm font-medium text-muted-foreground">
               <span>Set</span>
               <span>Reps</span>
               <span>Weight (kg)</span>
+              <span></span>
             </div>
             {editSets.map((set, index) => (
-              <div key={index} className="grid grid-cols-[60px_1fr_1fr] gap-2">
-                <span className="text-sm font-medium text-foreground flex items-center">
+              <div key={index} className="grid grid-cols-[60px_1fr_1fr_50px] gap-2 items-center">
+                <span className="text-sm font-medium text-foreground">
                   {index + 1}
                 </span>
                 <Input
                   type="number"
                   value={set.reps || ""}
                   onChange={(e) => updateEditSet(index, "reps", parseInt(e.target.value) || 0)}
+                  placeholder="0"
                   className="text-center"
+                  min="0"
                 />
                 <Input
                   type="number"
                   value={set.weight || ""}
                   onChange={(e) => updateEditSet(index, "weight", parseFloat(e.target.value) || 0)}
+                  placeholder="0"
                   className="text-center"
+                  min="0"
+                  step="0.5"
                 />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeSet(index)}
+                  className="h-8 w-8"
+                  disabled={editSets.length <= 1}
+                >
+                  <X className="h-4 w-4 text-destructive" />
+                </Button>
               </div>
             ))}
+            
+            {/* Add New Set Button */}
+            <Button
+              variant="outline"
+              onClick={addNewSet}
+              className="w-full border-dashed border-2 hover:border-primary hover:bg-primary/5"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add New Set
+            </Button>
+
+            {/* Info */}
+            <p className="text-xs text-muted-foreground text-center">
+              💡 Tip: Add multiple sets to track your progress better
+            </p>
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setEditingWorkout(null)}>
               Cancel
             </Button>
@@ -370,6 +449,24 @@ const Workout = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this workout log. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <BottomNav />
     </div>
