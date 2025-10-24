@@ -3,7 +3,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dumbbell, Trash2, Edit, Calendar } from "lucide-react";
+import { Dumbbell, Trash2, Edit, Calendar, Plus, X } from "lucide-react"; // Added Plus and X
 import { useAuth } from "@/context/AuthProvider";
 import { supabase } from "@/lib/supabaseClient";
 import { useToast } from "@/hooks/use-toast";
@@ -15,7 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 
 interface WorkoutSet {
   reps: number;
@@ -116,6 +115,29 @@ const Workout = () => {
     setEditSets(newSets);
   };
 
+  // NEW: Add new set function
+  const addNewSet = () => {
+    const newSet: WorkoutSet = {
+      reps: 0,
+      weight: 0,
+    };
+    setEditSets([...editSets, newSet]);
+  };
+
+  // NEW: Remove set function
+  const removeSet = (index: number) => {
+    if (editSets.length <= 1) {
+      toast({
+        title: "Cannot Remove",
+        description: "At least one set is required",
+        variant: "destructive",
+      });
+      return;
+    }
+    const newSets = editSets.filter((_, i) => i !== index);
+    setEditSets(newSets);
+  };
+
   const handleUpdate = async () => {
     if (!editingWorkout) return;
 
@@ -144,8 +166,8 @@ const Workout = () => {
       if (error) throw error;
 
       toast({
-        title: "Updated",
-        description: "Workout updated successfully",
+        title: "Updated! 💪",
+        description: `Workout updated with ${validSets.length} set${validSets.length > 1 ? 's' : ''}`,
       });
 
       setEditingWorkout(null);
@@ -178,6 +200,7 @@ const Workout = () => {
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-muted-foreground">Loading workouts...</p>
         </div>
+        <BottomNav />
       </div>
     );
   }
@@ -325,9 +348,9 @@ const Workout = () => {
         )}
       </div>
 
-      {/* Edit Dialog */}
+      {/* Edit Dialog - UPDATED */}
       <Dialog open={!!editingWorkout} onOpenChange={() => setEditingWorkout(null)}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[500px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Workout</DialogTitle>
             <DialogDescription>
@@ -335,32 +358,64 @@ const Workout = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-[60px_1fr_1fr] gap-2 text-sm font-medium text-muted-foreground">
+            {/* Header row with delete column */}
+            <div className="grid grid-cols-[60px_1fr_1fr_50px] gap-2 text-sm font-medium text-muted-foreground">
               <span>Set</span>
               <span>Reps</span>
               <span>Weight (kg)</span>
+              <span></span>
             </div>
+            
+            {/* Set rows with delete button */}
             {editSets.map((set, index) => (
-              <div key={index} className="grid grid-cols-[60px_1fr_1fr] gap-2">
-                <span className="text-sm font-medium text-foreground flex items-center">
+              <div key={index} className="grid grid-cols-[60px_1fr_1fr_50px] gap-2 items-center">
+                <span className="text-sm font-medium text-foreground">
                   {index + 1}
                 </span>
                 <Input
                   type="number"
                   value={set.reps || ""}
                   onChange={(e) => updateEditSet(index, "reps", parseInt(e.target.value) || 0)}
+                  placeholder="0"
                   className="text-center"
+                  min="0"
                 />
                 <Input
                   type="number"
                   value={set.weight || ""}
                   onChange={(e) => updateEditSet(index, "weight", parseFloat(e.target.value) || 0)}
+                  placeholder="0"
                   className="text-center"
+                  min="0"
+                  step="0.5"
                 />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeSet(index)}
+                  className="h-8 w-8"
+                  disabled={editSets.length <= 1}
+                >
+                  <X className="h-4 w-4 text-destructive" />
+                </Button>
               </div>
             ))}
+            
+            {/* Add New Set Button */}
+            <Button
+              variant="outline"
+              onClick={addNewSet}
+              className="w-full border-dashed border-2 hover:border-primary hover:bg-primary/5"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add New Set
+            </Button>
+
+            <p className="text-xs text-muted-foreground text-center">
+              💡 Tip: Add multiple sets to track your progress better
+            </p>
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setEditingWorkout(null)}>
               Cancel
             </Button>
