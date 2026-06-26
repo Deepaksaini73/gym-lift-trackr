@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BottomNav } from "@/components/BottomNav";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,6 @@ import {
   Crown,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthProvider";
-import { supabase } from "@/lib/supabaseClient";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -35,6 +34,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  demoUsers,
+  getCurrentDemoUser,
+  getWeightHistory,
+  getWorkoutLogs,
+} from "@/data/mockGymData";
 
 interface WorkoutStats {
   totalWorkouts: number;
@@ -95,7 +100,6 @@ const Summary = () => {
     "hsl(var(--chart-5))",
   ];
 
-  // Popular exercises for leaderboard
   const popularExercises = [
     "Bench Press",
     "Deadlift",
@@ -106,9 +110,7 @@ const Summary = () => {
   ];
 
   useEffect(() => {
-    if (user) {
-      fetchAllData();
-    }
+    loadAllData();
   }, [user]);
 
   useEffect(() => {
@@ -117,398 +119,230 @@ const Summary = () => {
     }
   }, [selectedExerciseForProgress]);
 
-  const fetchAllData = async () => {
+  useEffect(() => {
+    fetchLeaderboard(selectedExercise);
+  }, [selectedExercise]);
+
+  const loadAllData = async () => {
     setLoading(true);
     try {
-      await Promise.all([
-        fetchCurrentUserProfile(),
-        fetchWorkoutStats(),
-        fetchPersonalRecords(),
-        fetchLeaderboard(selectedExercise),
-        fetchWeightProgress(),
-        fetchAvailableExercises(),
-      ]);
+      fetchCurrentUserProfile();
+      fetchWorkoutStats();
+      fetchPersonalRecords();
+      fetchLeaderboard(selectedExercise);
+      fetchWeightProgress();
+      fetchAvailableExercises();
     } catch (error) {
-      console.error("Error fetching summary data:", error);
+      console.error("Error loading summary data:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchCurrentUserProfile = async () => {
-    if (!user) return;
+  const fetchCurrentUserProfile = () => {
+    const currentUser = user ?? getCurrentDemoUser();
+    const demoUser = demoUsers.find((demo) => demo.id === currentUser.id) ?? null;
 
-    try {
-      const { data, error } = await supabase
-        .from("users")
-        .select("full_name")
-        .eq("id", user.id)
-        .single();
-
-      if (error) {
-        console.error("Error fetching current user profile:", error);
-        return;
-      }
-
-      setCurrentUserProfile(data);
-      console.log("Current user profile loaded:", data);
-    } catch (error) {
-      console.error("Error in fetchCurrentUserProfile:", error);
-    }
+    setCurrentUserProfile({
+      full_name: demoUser?.full_name ?? currentUser.full_name ?? null,
+    });
   };
 
-  const fetchAvailableExercises = async () => {
-    if (!user) return;
+  const fetchAvailableExercises = () => {
+    const currentUserId = user?.id ?? getCurrentDemoUser().id;
+    const logs = getWorkoutLogs().filter((log) => log.user_id === currentUserId);
 
-    try {
-      const { data, error } = await supabase
-        .from("workout_logs")
-        .select("exercise_name")
-        .eq("user_id", user.id)
-        .order("exercise_name");
+    const uniqueExercises = Array.from(new Set(logs.map((log) => log.exercise_name))).sort();
+    setAvailableExercises(uniqueExercises);
 
-      if (error) throw error;
-
-      // Get unique exercise names
-      const uniqueExercises = Array.from(
-        new Set(data?.map((log) => log.exercise_name) || [])
-      ).sort();
-
-      setAvailableExercises(uniqueExercises);
-
-      // Set first exercise as default if not already set
-      if (uniqueExercises.length > 0 && !selectedExerciseForProgress) {
-        setSelectedExerciseForProgress(uniqueExercises[0]);
-      }
-    } catch (error) {
-      console.error("Error fetching available exercises:", error);
+    if (uniqueExercises.length > 0 && !selectedExerciseForProgress) {
+      setSelectedExerciseForProgress(uniqueExercises[0]);
     }
   };
 
   const fetchExerciseProgress = async (exerciseName: string) => {
-    if (!user || !exerciseName) return;
+    if (!exerciseName) return;
 
-    try {
-      const { data, error } = await supabase
-        .from("workout_logs")
-        .select("max_weight, created_at")
-        .eq("user_id", user.id)
-        .eq("exercise_name", exerciseName)
-        .order("created_at", { ascending: true });
+    const currentUserId = user?.id ?? getCurrentDemoUser().id;
 
-      if (error) throw error;
+    const logs = getWorkoutLogs()
+      .filter((log) => log.user_id === currentUserId && log.exercise_name === exerciseName)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-      // Transform data for chart
-      const progressData: ExerciseProgressData[] = (data || []).map((log, index) => ({
-        session: `#${index + 1}`,
-        maxWeight: log.max_weight,
-        date: new Date(log.created_at).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        }),
-        fullDate: new Date(log.created_at).toLocaleDateString(),
-      }));
+    const progressData: ExerciseProgressData[] = logs.map((log, index) => ({
+      session: `#${index + 1}`,
+      maxWeight: log.max_weight,
+      date: new Date(log.created_at).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      }),
+      fullDate: new Date(log.created_at).toLocaleDateString(),
+    }));
 
-      setExerciseProgressData(progressData);
-    } catch (error) {
-      console.error("Error fetching exercise progress:", error);
-    }
+    setExerciseProgressData(progressData);
   };
 
-  const fetchWorkoutStats = async () => {
-    if (!user) return;
+  const fetchWorkoutStats = () => {
+    const currentUserId = user?.id ?? getCurrentDemoUser().id;
 
-    try {
-      // Get last 7 days data
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      const { data, error } = await supabase
-        .from("workout_logs")
-        .select("*")
-        .eq("user_id", user.id)
-        .gte("created_at", sevenDaysAgo.toISOString());
+    const logs = getWorkoutLogs().filter(
+      (log) => log.user_id === currentUserId && new Date(log.created_at) >= sevenDaysAgo
+    );
 
-      if (error) throw error;
+    const totalWorkouts = logs.length;
 
-      // Calculate stats
-      const totalWorkouts = data?.length || 0;
-      const totalVolume = data?.reduce((sum, log) => {
+    const totalVolume =
+      logs.reduce((sum, log) => {
         const setVolume = log.sets.reduce(
-          (setSum: number, set: any) => setSum + set.reps * set.weight,
+          (setSum, set) => setSum + set.reps * set.weight,
           0
         );
         return sum + setVolume;
       }, 0) || 0;
 
-      // Body parts trained
-      const bodyPartsSet = new Set(data?.map((log) => log.body_part) || []);
-      const bodyPartsTrained = Array.from(bodyPartsSet);
+    const bodyPartsTrained = Array.from(new Set(logs.map((log) => log.body_part)));
 
-      // Top exercises
-      const exerciseMap = new Map<string, { count: number; maxWeight: number }>();
-      data?.forEach((log) => {
-        const existing = exerciseMap.get(log.exercise_name) || {
-          count: 0,
-          maxWeight: 0,
-        };
-        exerciseMap.set(log.exercise_name, {
-          count: existing.count + 1,
-          maxWeight: Math.max(existing.maxWeight, log.max_weight),
-        });
+    const exerciseMap = new Map<string, { count: number; maxWeight: number }>();
+    logs.forEach((log) => {
+      const existing = exerciseMap.get(log.exercise_name) || { count: 0, maxWeight: 0 };
+      exerciseMap.set(log.exercise_name, {
+        count: existing.count + 1,
+        maxWeight: Math.max(existing.maxWeight, log.max_weight),
       });
+    });
 
-      const topExercises = Array.from(exerciseMap.entries())
-        .map(([name, data]) => ({ name, ...data }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 3);
+    const topExercises = Array.from(exerciseMap.entries())
+      .map(([name, data]) => ({ name, ...data }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3);
 
-      // Weekly volume by day
-      const weeklyVolumeMap = new Map<string, number>();
-      data?.forEach((log) => {
-        const date = new Date(log.created_at).toLocaleDateString("en-US", {
-          weekday: "short",
-        });
-        const dateKey = new Date(log.created_at).toISOString().split("T")[0];
-        const setVolume = log.sets.reduce(
-          (sum: number, set: any) => sum + set.reps * set.weight,
-          0
-        );
-        weeklyVolumeMap.set(
-          dateKey,
-          (weeklyVolumeMap.get(dateKey) || 0) + setVolume
-        );
-      });
+    const weeklyVolumeMap = new Map<string, number>();
+    logs.forEach((log) => {
+      const dateKey = new Date(log.created_at).toISOString().split("T")[0];
+      const setVolume = log.sets.reduce(
+        (sum, set) => sum + set.reps * set.weight,
+        0
+      );
+      weeklyVolumeMap.set(dateKey, (weeklyVolumeMap.get(dateKey) || 0) + setVolume);
+    });
 
-      const weeklyVolume = Array.from(weeklyVolumeMap.entries())
-        .map(([date, volume]) => ({
-          day: new Date(date).toLocaleDateString("en-US", { weekday: "short" }),
-          volume,
-          date,
-        }))
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const weeklyVolume = Array.from(weeklyVolumeMap.entries())
+      .map(([date, volume]) => ({
+        day: new Date(date).toLocaleDateString("en-US", { weekday: "short" }),
+        volume,
+        date,
+      }))
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-      // Muscle distribution
-      const bodyPartVolume = new Map<string, number>();
-      data?.forEach((log) => {
-        const setVolume = log.sets.reduce(
-          (sum: number, set: any) => sum + set.reps * set.weight,
-          0
-        );
-        bodyPartVolume.set(
-          log.body_part,
-          (bodyPartVolume.get(log.body_part) || 0) + setVolume
-        );
-      });
+    const bodyPartVolume = new Map<string, number>();
+    logs.forEach((log) => {
+      const setVolume = log.sets.reduce(
+        (sum, set) => sum + set.reps * set.weight,
+        0
+      );
+      bodyPartVolume.set(
+        log.body_part,
+        (bodyPartVolume.get(log.body_part) || 0) + setVolume
+      );
+    });
 
-      const muscleDistribution = Array.from(bodyPartVolume.entries())
-        .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value);
+    const muscleDistribution = Array.from(bodyPartVolume.entries()).map(([name, value]) => ({
+      name,
+      value,
+    }));
 
-      setStats({
-        totalWorkouts,
-        totalVolume,
-        bodyPartsTrained,
-        topExercises,
-        weeklyVolume,
-        muscleDistribution,
-      });
-    } catch (error) {
-      console.error("Error fetching workout stats:", error);
-    }
+    setStats({
+      totalWorkouts,
+      totalVolume,
+      bodyPartsTrained,
+      topExercises,
+      weeklyVolume,
+      muscleDistribution,
+    });
   };
 
-  const fetchPersonalRecords = async () => {
-    if (!user) return;
+  const fetchPersonalRecords = () => {
+    const currentUserId = user?.id ?? getCurrentDemoUser().id;
+    const logs = getWorkoutLogs().filter((log) => log.user_id === currentUserId);
 
-    try {
-      const { data, error } = await supabase
-        .from("workout_logs")
-        .select("exercise_name, max_weight, created_at, body_part")
-        .eq("user_id", user.id)
-        .order("max_weight", { ascending: false });
+    const recordsMap = new Map<string, PersonalRecord>();
+    logs.forEach((log) => {
+      const existing = recordsMap.get(log.exercise_name);
+      if (!existing || log.max_weight > existing.max_weight) {
+        recordsMap.set(log.exercise_name, {
+          exercise_name: log.exercise_name,
+          max_weight: log.max_weight,
+          date: new Date(log.created_at).toLocaleDateString(),
+          body_part: log.body_part,
+        });
+      }
+    });
 
-      if (error) throw error;
+    const records = Array.from(recordsMap.values())
+      .sort((a, b) => b.max_weight - a.max_weight)
+      .slice(0, 10);
 
-      // Get unique exercises with highest weight
-      const recordsMap = new Map<string, PersonalRecord>();
-      data?.forEach((log) => {
-        const existing = recordsMap.get(log.exercise_name);
-        if (!existing || log.max_weight > existing.max_weight) {
-          recordsMap.set(log.exercise_name, {
-            exercise_name: log.exercise_name,
-            max_weight: log.max_weight,
-            date: new Date(log.created_at).toLocaleDateString(),
-            body_part: log.body_part,
-          });
-        }
-      });
-
-      const records = Array.from(recordsMap.values())
-        .sort((a, b) => b.max_weight - a.max_weight)
-        .slice(0, 10);
-
-      setPersonalRecords(records);
-    } catch (error) {
-      console.error("Error fetching personal records:", error);
-    }
+    setPersonalRecords(records);
   };
 
-  const fetchLeaderboard = async (exerciseName: string) => {
-    if (!user) return;
+  const fetchLeaderboard = (exerciseName: string) => {
+    const logs = getWorkoutLogs().filter((log) => log.exercise_name === exerciseName);
 
-    try {
-      console.log(`Fetching leaderboard for: ${exerciseName}`);
-
-      // Step 1: Get ALL workout logs for this specific exercise from ALL users
-      const { data: workoutData, error: workoutError } = await supabase
-        .from("workout_logs")
-        .select("user_id, max_weight, created_at")
-        .eq("exercise_name", exerciseName);
-
-      if (workoutError) {
-        console.error("Error fetching workout data:", workoutError);
-        throw workoutError;
-      }
-
-      console.log(`Found ${workoutData?.length || 0} total logs for ${exerciseName}`);
-
-      if (!workoutData || workoutData.length === 0) {
-        setLeaderboard([]);
-        return;
-      }
-
-      // Step 2: Find the BEST (highest weight) for each user
-      const userBestMap = new Map<string, { max_weight: number; created_at: string }>();
-      
-      workoutData.forEach((log) => {
-        const existing = userBestMap.get(log.user_id);
-        
-        // Keep the highest weight for each user
-        if (!existing || log.max_weight > existing.max_weight) {
-          userBestMap.set(log.user_id, {
-            max_weight: log.max_weight,
-            created_at: log.created_at,
-          });
-        }
-      });
-
-      console.log(`Unique users who did ${exerciseName}: ${userBestMap.size}`);
-
-      // Step 3: Get user profiles AND users data for all users
-      const userIds = Array.from(userBestMap.keys());
-      
-      // Fetch from users table (primary source for names)
-      const { data: usersData, error: usersError } = await supabase
-        .from("users")
-        .select("id, full_name")
-        .in("id", userIds);
-
-      if (usersError) {
-        console.error("Error fetching users:", usersError);
-      }
-
-      // Fetch from profiles table (fallback)
-      const { data: profilesData, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id, full_name, username")
-        .in("id", userIds);
-
-      if (profilesError) {
-        console.error("Error fetching profiles:", profilesError);
-      }
-
-      console.log("Users data fetched:", usersData);
-      console.log("Profiles data fetched:", profilesData);
-
-      // Step 4: Convert to array with user names (prioritize users table)
-      const usersWithNames = Array.from(userBestMap.entries()).map(([userId, data]) => {
-        const userRecord = usersData?.find((u) => u.id === userId);
-        const profile = profilesData?.find((p) => p.id === userId);
-        
-        let userName: string;
-
-        if (userId === user.id) {
-          // Current user - use stored profile from users table
-          userName = currentUserProfile?.full_name || 
-                     userRecord?.full_name || 
-                     profile?.full_name || 
-                     profile?.username || 
-                     user.email?.split("@")[0] || 
-                     "You";
-          console.log(`Current user name resolved to: ${userName}`);
-        } else {
-          // Other users - prioritize users table over profiles
-          userName = userRecord?.full_name || 
-                     profile?.full_name || 
-                     profile?.username || 
-                     `User ${userId.substring(0, 8)}`;
-        }
-
-        return {
-          user_id: userId,
-          user_name: userName,
-          max_weight: data.max_weight,
-          created_at: data.created_at,
-          isCurrentUser: userId === user.id,
-        };
-      });
-
-      // Step 5: Sort by max_weight (descending)
-      const sortedUsers = usersWithNames.sort((a, b) => b.max_weight - a.max_weight);
-
-      console.log("Sorted users (top 3):", sortedUsers.slice(0, 3));
-
-      // Step 6: Create leaderboard entries with ranks
-      const leaderboardData: LeaderboardEntry[] = sortedUsers.map((entry, index) => ({
-        exercise_name: exerciseName,
-        max_weight: entry.max_weight,
-        user_name: entry.user_name,
-        user_id: entry.user_id,
-        date: new Date(entry.created_at).toLocaleDateString(),
-        rank: index + 1,
-        isCurrentUser: entry.isCurrentUser,
-      }));
-
-      // Step 7: Take top 10 only
-      const top10 = leaderboardData.slice(0, 10);
-      
-      console.log("Final leaderboard (top 10):", top10);
-      setLeaderboard(top10);
-
-    } catch (error) {
-      console.error("Error in fetchLeaderboard:", error);
+    if (logs.length === 0) {
       setLeaderboard([]);
+      return;
     }
+
+    const userBestMap = new Map<string, { max_weight: number; created_at: string }>();
+
+    logs.forEach((log) => {
+      const existing = userBestMap.get(log.user_id);
+      if (!existing || log.max_weight > existing.max_weight) {
+        userBestMap.set(log.user_id, {
+          max_weight: log.max_weight,
+          created_at: log.created_at,
+        });
+      }
+    });
+
+    const usersWithNames = Array.from(userBestMap.entries()).map(([userId, data]) => {
+      const profile = demoUsers.find((u) => u.id === userId);
+
+      const userName =
+        userId === (user?.id ?? getCurrentDemoUser().id)
+          ? currentUserProfile?.full_name || profile?.full_name || "You"
+          : profile?.full_name || `User ${userId.substring(0, 8)}`;
+
+      return {
+        user_id: userId,
+        user_name: userName,
+        max_weight: data.max_weight,
+        created_at: data.created_at,
+        isCurrentUser: userId === (user?.id ?? getCurrentDemoUser().id),
+      };
+    });
+
+    const sortedUsers = usersWithNames.sort((a, b) => b.max_weight - a.max_weight);
+
+    const leaderboardData: LeaderboardEntry[] = sortedUsers.map((entry, index) => ({
+      exercise_name: exerciseName,
+      max_weight: entry.max_weight,
+      user_name: entry.user_name,
+      user_id: entry.user_id,
+      date: new Date(entry.created_at).toLocaleDateString(),
+      rank: index + 1,
+      isCurrentUser: entry.isCurrentUser,
+    }));
+
+    setLeaderboard(leaderboardData.slice(0, 10));
   };
 
-  const fetchWeightProgress = async () => {
-    if (!user) return;
-
-    try {
-      // Get user's weight history from profile updates
-      const { data, error } = await supabase
-        .from("users")
-        .select("weight, created_at")
-        .eq("id", user.id)
-        .single();
-
-      if (error) throw error;
-
-      // For now, we'll track weight from workout_logs metadata
-      // In production, you'd want a separate weight_tracking table
-      const currentWeight = data?.weight;
-      if (currentWeight) {
-        setWeightProgress([
-          {
-            date: new Date(data.created_at).toLocaleDateString(),
-            weight: currentWeight,
-          },
-        ]);
-      }
-    } catch (error) {
-      console.error("Error fetching weight progress:", error);
-    }
+  const fetchWeightProgress = () => {
+    const currentUserId = user?.id ?? getCurrentDemoUser().id;
+    setWeightProgress(getWeightHistory(currentUserId));
   };
 
   if (loading) {
@@ -531,7 +365,6 @@ const Summary = () => {
   return (
     <div className="min-h-screen bg-background pb-20">
       <div className="max-w-lg mx-auto p-4 space-y-6">
-        {/* Header */}
         <div className="pt-2">
           <h1 className="text-3xl font-bold text-foreground">Summary</h1>
           <p className="text-muted-foreground">Your complete fitness overview</p>
@@ -544,9 +377,7 @@ const Summary = () => {
             <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
           </TabsList>
 
-          {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6 mt-6">
-            {/* Stats Grid */}
             <div className="grid grid-cols-2 gap-3">
               <Card className="p-4 bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
                 <div className="flex items-center gap-2 mb-2">
@@ -571,20 +402,14 @@ const Summary = () => {
               </Card>
             </div>
 
-            {/* Exercise Progress Chart - NEW */}
             {availableExercises.length > 0 && (
               <Card className="p-4 bg-card border-border">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <TrendingUp className="h-5 w-5 text-primary" />
-                    <h3 className="text-lg font-semibold text-foreground">
-                      Exercise Progress
-                    </h3>
+                    <h3 className="text-lg font-semibold text-foreground">Exercise Progress</h3>
                   </div>
-                  <Select
-                    value={selectedExerciseForProgress}
-                    onValueChange={setSelectedExerciseForProgress}
-                  >
+                  <Select value={selectedExerciseForProgress} onValueChange={setSelectedExerciseForProgress}>
                     <SelectTrigger className="w-[180px]">
                       <SelectValue placeholder="Select exercise" />
                     </SelectTrigger>
@@ -605,7 +430,7 @@ const Summary = () => {
                         <div>
                           <p className="text-sm text-muted-foreground">Current PR</p>
                           <p className="text-2xl font-bold text-primary">
-                            {Math.max(...exerciseProgressData.map(d => d.maxWeight))} kg
+                            {Math.max(...exerciseProgressData.map((d) => d.maxWeight))} kg
                           </p>
                         </div>
                         <div className="text-right">
@@ -628,7 +453,7 @@ const Summary = () => {
                         <YAxis
                           stroke="#9CA3AF"
                           style={{ fontSize: "12px" }}
-                          domain={['dataMin - 5', 'dataMax + 5']}
+                          domain={["dataMin - 5", "dataMax + 5"]}
                         />
                         <Tooltip
                           contentStyle={{
@@ -638,9 +463,7 @@ const Summary = () => {
                           }}
                           formatter={(value: any) => [`${value} kg`, "Max Weight"]}
                           labelFormatter={(label) => {
-                            const entry = exerciseProgressData.find(
-                              (d) => d.session === label
-                            );
+                            const entry = exerciseProgressData.find((d) => d.session === label);
                             return entry ? `${entry.session} - ${entry.fullDate}` : label;
                           }}
                         />
@@ -663,7 +486,6 @@ const Summary = () => {
               </Card>
             )}
 
-            {/* Body Weight Progress */}
             {weightProgress.length > 0 && (
               <Card className="p-4 bg-card border-border">
                 <div className="flex items-center justify-between mb-3">
@@ -694,7 +516,6 @@ const Summary = () => {
               </Card>
             )}
 
-            {/* Body Parts Trained */}
             {stats && stats.bodyPartsTrained.length > 0 && (
               <Card className="p-4 bg-card border-border">
                 <h3 className="text-lg font-semibold text-foreground mb-3">
@@ -713,7 +534,6 @@ const Summary = () => {
               </Card>
             )}
 
-            {/* Top Exercises */}
             {stats && stats.topExercises.length > 0 && (
               <Card className="p-4 bg-card border-border">
                 <h3 className="text-lg font-semibold text-foreground mb-3">
@@ -737,9 +557,7 @@ const Summary = () => {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-lg font-bold text-primary">
-                          {exercise.maxWeight} kg
-                        </p>
+                        <p className="text-lg font-bold text-primary">{exercise.maxWeight} kg</p>
                         <p className="text-xs text-muted-foreground">PR</p>
                       </div>
                     </div>
@@ -748,20 +566,13 @@ const Summary = () => {
               </Card>
             )}
 
-            {/* Weekly Volume Chart */}
             {stats && stats.weeklyVolume.length > 0 && (
               <Card className="p-4 bg-card border-border">
-                <h3 className="text-lg font-semibold text-foreground mb-4">
-                  Weekly Volume
-                </h3>
+                <h3 className="text-lg font-semibold text-foreground mb-4">Weekly Volume</h3>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={stats.weeklyVolume}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis
-                      dataKey="day"
-                      stroke="#9CA3AF"
-                      style={{ fontSize: "12px" }}
-                    />
+                    <XAxis dataKey="day" stroke="#9CA3AF" style={{ fontSize: "12px" }} />
                     <YAxis stroke="#9CA3AF" style={{ fontSize: "12px" }} />
                     <Tooltip
                       contentStyle={{
@@ -771,17 +582,12 @@ const Summary = () => {
                       }}
                       formatter={(value: any) => [`${value} kg`, "Volume"]}
                     />
-                    <Bar
-                      dataKey="volume"
-                      fill="hsl(var(--primary))"
-                      radius={[8, 8, 0, 0]}
-                    />
+                    <Bar dataKey="volume" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
             )}
 
-            {/* Muscle Distribution */}
             {stats && stats.muscleDistribution.length > 0 && (
               <Card className="p-4 bg-card border-border">
                 <h3 className="text-lg font-semibold text-foreground mb-4">
@@ -794,18 +600,13 @@ const Summary = () => {
                       cx="50%"
                       cy="50%"
                       labelLine={false}
-                      label={({ name, percent }) =>
-                        `${name} ${(percent * 100).toFixed(0)}%`
-                      }
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                       outerRadius={80}
                       fill="#8884d8"
                       dataKey="value"
                     >
                       {stats.muscleDistribution.map((entry, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={COLORS[index % COLORS.length]}
-                        />
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
                     <Tooltip
@@ -820,13 +621,10 @@ const Summary = () => {
               </Card>
             )}
 
-            {/* Empty State */}
             {stats?.totalWorkouts === 0 && (
               <Card className="p-8 text-center border-dashed border-2">
                 <Target className="h-16 w-16 text-muted-foreground mx-auto mb-4 opacity-50" />
-                <h3 className="text-lg font-semibold text-foreground mb-2">
-                  No Data Yet
-                </h3>
+                <h3 className="text-lg font-semibold text-foreground mb-2">No Data Yet</h3>
                 <p className="text-sm text-muted-foreground">
                   Start logging workouts to see your progress!
                 </p>
@@ -834,7 +632,6 @@ const Summary = () => {
             )}
           </TabsContent>
 
-          {/* Personal Records Tab */}
           <TabsContent value="records" className="space-y-4 mt-6">
             <Card className="p-4 bg-card border-border">
               <div className="flex items-center gap-2 mb-4">
@@ -863,9 +660,7 @@ const Summary = () => {
                           #{index + 1}
                         </span>
                         <div>
-                          <p className="text-foreground font-medium">
-                            {record.exercise_name}
-                          </p>
+                          <p className="text-foreground font-medium">{record.exercise_name}</p>
                           <p className="text-xs text-muted-foreground capitalize">
                             {record.body_part} • {record.date}
                           </p>
@@ -883,19 +678,14 @@ const Summary = () => {
             </Card>
           </TabsContent>
 
-          {/* Leaderboard Tab */}
           <TabsContent value="leaderboard" className="space-y-4 mt-6">
-            {/* Exercise Selector */}
             <div className="flex gap-2 overflow-x-auto pb-2">
               {popularExercises.map((exercise) => (
                 <Button
                   key={exercise}
                   variant={selectedExercise === exercise ? "default" : "outline"}
                   size="sm"
-                  onClick={() => {
-                    setSelectedExercise(exercise);
-                    fetchLeaderboard(exercise);
-                  }}
+                  onClick={() => setSelectedExercise(exercise)}
                   className="whitespace-nowrap"
                 >
                   {exercise}
@@ -903,7 +693,6 @@ const Summary = () => {
               ))}
             </div>
 
-            {/* Current User Rank */}
             {currentUserRank && (
               <Card className="p-4 bg-gradient-to-br from-primary/20 to-secondary/10 border-primary/30">
                 <div className="flex items-center gap-3">
@@ -931,7 +720,6 @@ const Summary = () => {
               </Card>
             )}
 
-            {/* Leaderboard List */}
             <Card className="p-4 bg-card border-border">
               <div className="flex items-center gap-2 mb-4">
                 <Trophy className="h-6 w-6 text-primary" />

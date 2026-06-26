@@ -13,7 +13,6 @@ import Login from "./pages/Login";
 import ProgressPhotos from "./pages/ProgressPhotos";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/context/AuthProvider";
-import RequireAuth from "@/components/RequireAuth";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 
@@ -29,21 +28,14 @@ const App = () => (
         <InstallPrompt />
         <BrowserRouter>
           <Routes>
-            {/* Public */}
+            <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
-
-            {/* Protected routes */}
-            <Route element={<RequireAuth />}>
-              <Route path="/" element={<Home />} />
-              <Route path="/exercises/:part" element={<ExerciseList />} />
-              <Route path="/exercise/:bodyPart/:id" element={<ExerciseDetail />} />
-              <Route path="/summary" element={<Summary />} />
-              <Route path="/progress" element={<ProgressPhotos />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/workout" element={<Workout />} />
-            </Route>
-
-            {/* Fallback */}
+            <Route path="/exercises/:part" element={<ExerciseList />} />
+            <Route path="/exercise/:bodyPart/:id" element={<ExerciseDetail />} />
+            <Route path="/summary" element={<Summary />} />
+            <Route path="/progress" element={<ProgressPhotos />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/workout" element={<Workout />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
